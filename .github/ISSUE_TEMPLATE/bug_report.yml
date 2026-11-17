@@ -1,0 +1,36 @@
+name: Bug report
+description: Something went wrong or gave an unexpected result
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report it. A .blend saved just before the
+        problem, with the selection already made, is the most useful thing to attach.
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Facetor and Blender versions, operating system
+      placeholder: Facetor 1.0.0, Blender 4.5.3, Windows 11
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: What you did
+      description: The selection, then the keys in order (e.g. Alt+B, wheel down 3 times, S, wheel up)
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: What happened, and what you expected
+      description: Paste the error message or the message shown in the header, if any
+    validations:
+      required: true
+  - type: textarea
+    id: files
+    attributes:
+      label: File and screenshots
+      description: Drag the .blend (zipped) and screenshots here

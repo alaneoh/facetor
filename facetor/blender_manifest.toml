@@ -1,0 +1,29 @@
+schema_version = "1.0.0"
+
+id = "facetor"
+version = "1.0.0"
+name = "Facetor"
+tagline = "Change the segments of any round shape, keep its silhouette"
+maintainer = "Alaneo Houssart"
+type = "add-on"
+
+# website: add the GitHub repository's URL once it is public (without it, Blender
+# shows the extension's page on extensions.blender.org)
+
+tags = ["Mesh", "Modeling"]
+
+blender_version_min = "4.2.0"
+
+license = [
+  "SPDX:GPL-3.0-or-later",
+]
+copyright = [
+  "2026 Alaneo Houssart",
+]
+
+[build]
+paths_exclude_pattern = [
+  "__pycache__/",
+  "/.git/",
+  "*.zip",
+]
