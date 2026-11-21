@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Alaneo Houssart
+# Copyright (C) 2026 Alanéo Houssart
 #
 # ***** BEGIN GPL LICENSE BLOCK *****
 #
@@ -20,8 +20,8 @@
 
 bl_info = {
     "name": "Facetor",
-    "author": "Alaneo Houssart",
-    "version": (1, 0, 0),
+    "author": "Alanéo Houssart",
+    "version": (1, 0, 1),
     "blender": (4, 2, 0),
     "location": "Edit Mode > Face menu (Ctrl+F) / Edge menu (Ctrl+E) > Facetor, or Alt+B",
     "description": "Change the number of segments of cylinders, holes, bevels, fillets and other round shapes while keeping their silhouette",

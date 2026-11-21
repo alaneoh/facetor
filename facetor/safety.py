@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Alaneo Houssart
+# Copyright (C) 2026 Alanéo Houssart
 #
 # ***** BEGIN GPL LICENSE BLOCK *****
 #

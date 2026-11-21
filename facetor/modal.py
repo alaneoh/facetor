@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Alaneo Houssart
+# Copyright (C) 2026 Alanéo Houssart
 #
 # ***** BEGIN GPL LICENSE BLOCK *****
 #
@@ -26,7 +26,8 @@ import mathutils.kdtree
 from mathutils import Vector
 
 from .attributes import Keeper, triangulate_ngons
-from .corners import bevel_network, has_bevel_poles, network_collapse, network_rebuild, network_scale
+from .corners import (bevel_network, has_bevel_poles, measure_shape, network_collapse, network_rebuild,
+                      network_scale, square_in_corners)
 from .core import (
     AXES, _face_components, apply_profile, direction_stats, edge_between, grid_profiles, profile_reduce,
     ordered,
@@ -296,7 +297,7 @@ Select its faces, the edge loop of a hole, or the edges of a rounded corner on a
         ("CUSTOM", "Custom Profile", "Use the bevel tool's custom profile"),
     ], options={"SKIP_SAVE"})
     profile_shape: bpy.props.FloatProperty(name="Shape", default=0.5, min=0.0, max=1.0, options={"SKIP_SAVE"},
-                                           description="Round shape: 0.25 = straight, 0.5 = circle, 1 = square corner, below 0.25 = concave")
+                                           description="Round shape: 0.25 = straight, 0.5 = circle, 1 = square corner, below 0.25 = concave, 0 = square inward")
     width: bpy.props.FloatProperty(name="Width", default=1.0, min=0.0, soft_max=3.0, options={"SKIP_SAVE"},
                                    description="Bevel width, relative to the current one (1 = unchanged, "
                                                "0 = merged back into a sharp edge)")
@@ -571,12 +572,25 @@ Select its faces, the edge loop of a hole, or the edges of a rounded corner on a
 
     # ----- interactive: mouse wheel
     def invoke(self, context, event):
-        # every Alt+B starts fresh: main direction, Keep Silhouette, default width and profile
+        # every Alt+B starts fresh: main direction, Keep Silhouette, default width; the shape is
+        # the part's own (a fillet already changed to 0.85 starts P / Round at 0.85, not 0.5)
         self.swap = False
         self.shape = "KEEP"
         self.width = 1.0
-        self.profile_shape = 0.5
+        self._shape_found = 0.5
+        try:
+            obj = context.edit_object
+            if obj is not None and obj.type == "MESH":
+                sel = [f for f in bmesh.from_edit_mesh(obj.data).faces if f.select]
+                found = measure_shape(sel) if sel else None
+                if found is not None:
+                    self._shape_found = found
+        except Exception:
+            pass
+        self.profile_shape = self._shape_found
         self._touched = False
+        # modes already found not to fit this selection: skipped on the next mouse moves
+        self._not_modes = {}
         n, _ = self._current_count(context)
         if n:
             self.segments = n
@@ -606,6 +620,7 @@ Select its faces, the edge loop of a hole, or the edges of a rounded corner on a
         self._start_profile = self.profile_shape
         self._mouse_profile = False
         self._mouse_width = False
+        self._fine = False
         self._typed = ""
         self._err = ""
         self._kept = False
@@ -728,7 +743,7 @@ Select its faces, the edge loop of a hole, or the edges of a rounded corner on a
                 self._touched = True
             self._apply(context)
             return {"RUNNING_MODAL"}
-        if t not in {"MOUSEMOVE", "INBETWEEN_MOUSEMOVE", "TIMER"} and v == "PRESS":
+        if t not in {"MOUSEMOVE", "INBETWEEN_MOUSEMOVE", "TIMER", "LEFT_SHIFT", "RIGHT_SHIFT"} and v == "PRESS":
             self._typed = ""
         if up or down:
             n = self.segments
@@ -775,7 +790,8 @@ Select its faces, the edge loop of a hole, or the edges of a rounded corner on a
             self.swap = not self.swap
             # profile type, width and shape belong to the direction they were set in (the first
             # one is kept in the snapshot): the other direction starts in Keep
-            self.shape, self.width, self.profile_shape = "KEEP", 1.0, 0.5
+            self.shape, self.width = "KEEP", 1.0
+            self.profile_shape = 0.5 if self.swap else getattr(self, "_shape_found", 0.5)
             self._mouse_width = self._mouse_profile = False
             if self.swap:
                 self._other_visited = True
@@ -825,7 +841,15 @@ Select its faces, the edge loop of a hole, or the edges of a rounded corner on a
             if getattr(self, "_typed", ""):
                 return {"RUNNING_MODAL"}           # a typed value wins over the mouse
             if self.shape != "KEEP" or getattr(self, "_mouse_width", False):
-                dx = event.mouse_x - self._start_x
+                # Shift held: ten times finer (like Blender's tools), from where the value is
+                # when it's pressed or released (no jump)
+                fine = bool(getattr(event, "shift", False))
+                if fine != getattr(self, "_fine", False):
+                    self._fine = fine
+                    self._start_x = event.mouse_x
+                    self._start_width = self.width
+                    self._start_profile = self.profile_shape
+                dx = (event.mouse_x - self._start_x) * (0.1 if fine else 1.0)
                 if getattr(self, "_mouse_profile", False) and self.shape == "ROUND":
                     self.profile_shape = max(0.0, min(1.0, self._start_profile + dx / 400.0))
                 else:
@@ -1027,8 +1051,20 @@ Select its faces, the edge loop of a hole, or the edges of a rounded corner on a
             all(v in closed_verts for v in f.verts) for f in set(sel) - set(grid_faces_of(sel)))
 
         # 2) part of revolution made of pieces with different side counts (MoI): one count for all
+        # (in the modal, a detection that failed once for this selection isn't run again: the
+        # mesh is back to its original state before every change)
+        not_modes = getattr(self, "_not_modes", None)
         if sel and not clean:
-            res, rerr = revolution_rings(bm, sel)
+            bm.faces.index_update()
+            skip = set()
+            if not_modes is not None:
+                key = (self.swap, len(bm.verts), len(bm.faces), tuple(sorted(f.index for f in sel)))
+                skip = not_modes.setdefault(key, set())
+            rerr = True
+            if "revolution" not in skip:
+                res, rerr = revolution_rings(bm, sel)
+                if rerr:
+                    skip.add("revolution")
             if not rerr:
                 if self.swap:
                     sides = revolution_count(bm, sel)
@@ -1049,15 +1085,21 @@ Select its faces, the edge loop of a hole, or the edges of a rounded corner on a
                 bmesh.update_edit_mesh(me)
                 return None, True, infos
             # same, but cut by a detail (slot, recess): the detail is kept as it is
-            with _clip_cache():
-                res = _recess_change(self, bm, me, sel, infos)
-            if res is not None:
-                return res
+            if "recess" not in skip:
+                with _clip_cache():
+                    res = _recess_change(self, bm, me, sel, infos)
+                if res is not None:
+                    return res
+                skip.add("recess")
             # a dome cut by unselected geometry (bar across a dish): the cut edge is kept
-            res = _dome_change(self, bm, me, sel, infos)
-            if res is not None:
-                return res
-            cdata, cerr = revolution_cut_rings(bm, sel)
+            if "dome" not in skip:
+                res = _dome_change(self, bm, me, sel, infos)
+                if res is not None:
+                    return res
+                skip.add("dome")
+            cdata, cerr = (None, True) if "cut" in skip else revolution_cut_rings(bm, sel)
+            if cerr or len(cdata["order"]) < 2:
+                skip.add("cut")
             if not cerr and len(cdata["order"]) >= 2 and _no_width(self, "a part of revolution cut by a detail"):
                 return _no_width(self, "a part of revolution cut by a detail"), False, infos
             if not cerr and len(cdata["order"]) >= 2 and self.swap:
@@ -1137,6 +1179,18 @@ Select its faces, the edge loop of a hole, or the edges of a rounded corner on a
                                 self.width = w
                     return res["err"] is None
                 ok, _ = guarded(bm, rebuild)
+                ps = self.profile_shape
+                if not ok and not merge and self.shape == "ROUND" and 0.0 < ps < 0.01:
+                    # a hair above 0 the corners are too small to be built (their faces have no
+                    # area left): the square profile, which looks the same
+                    sel = [f for f in bm.faces if f.select]
+                    net, nerr = bevel_network(sel)
+                    if net and not nerr:
+                        self.profile_shape = 0.0
+                        try:
+                            ok, _ = guarded(bm, rebuild)
+                        finally:
+                            self.profile_shape = ps
                 if not ok:
                     return (res.get("err") or "These fillets are joined to the rest of the mesh in a way "
                             "that can't be changed safely."), False, infos
@@ -1167,6 +1221,12 @@ Select its faces, the edge loop of a hole, or the edges of a rounded corner on a
                 bm.normal_update()
                 bmesh.update_edit_mesh(me)
                 return None, True, infos
+
+        # fillets already squared inward (shape 0) on a network: steps welded at the corners, no
+        # corner faces; the strip modes would fold them
+        if sel and square_in_corners(sel):
+            return ("These fillets have a square inward profile (Shape 0) and no corners left: "
+                    "they can't be changed again (undo to go back)."), False, infos
 
         # 3) messy strip (n-gons / T-junctions from CAD): rebuilt from its two ends (n-gons that
         # are quads with T-junctions on the border go to the grid mode when it can change them)
@@ -1427,6 +1487,8 @@ def _status_draw(shape, mouse_width=False):
         if shape != "KEEP" or mouse_width:
             row.separator(factor=2)
             row.label(text="Width", icon=_icon("MOUSE_MOVE"))
+            row.separator(factor=2)
+            row.label(text="Precision", icon=_icon("EVENT_SHIFT"))
         row.separator(factor=2)
         row.label(text="Shape", icon=_icon("EVENT_P"))
         row.separator(factor=2)

@@ -9,10 +9,10 @@ Select a cylinder, a hole, a bevel, a fillet or a part of revolution, press
 the mesh stays connected, and the result updates live. Facetor works on any mesh
 and handles the messy topology of CAD exports (MoI3D, Fusion 360, Plasticity…).
 
-- Version: **1.0.0**
+- Version: **1.0.1**
 - Blender: **4.2 LTS and later**
 - License: **GPL-3.0-or-later**
-- Maintainer: Alaneo Houssart
+- Maintainer: Alanéo Houssart
 
 ## Features
 
@@ -39,13 +39,14 @@ and handles the messy topology of CAD exports (MoI3D, Fusion 360, Plasticity…)
 |---|---|
 | ![Tubes](docs/images/preview_tube.png) | ![Fillet networks](docs/images/preview_box.png) |
 | ![Domes cut by other geometry](docs/images/preview_domes.png) | ![CAD fillets](docs/images/preview_rightcover.png) |
+| ![Bevel width](docs/images/preview_width.png) | ![Profile shape](docs/images/preview_shape.png) |
 
 ## Installation
 
 **From Blender:** Edit > Preferences > Get Extensions, search for **Facetor**,
 click Install.
 
-**From disk:** download `facetor-1.0.0.zip` from the
+**From disk:** download `facetor-1.0.1.zip` from the
 [releases](../../releases), then Edit > Preferences > Get Extensions > arrow at
 the top right > Install from Disk (or drag the .zip into Blender).
 
@@ -55,7 +56,8 @@ the top right > Install from Disk (or drag the .zip into Blender).
 2. **Alt+B** (or Ctrl+F / Ctrl+E > Facetor, or F3 > Facetor).
 3. Mouse wheel: ±1 segment. Ctrl + wheel: multiple of 4. Or type the value.
    **S**: other direction. **R**: profile type (Keep / Round / Custom).
-   **W**: width. **P**: shape. **T**: triangulate the n-gons left around the change.
+   **W**: width. **P**: shape. Hold **Shift** while moving the mouse for finer
+   steps. **T**: triangulate the n-gons left around the change.
 4. Left click or Enter to confirm, right click or Esc to cancel. Both directions
    can be adjusted afterwards in the redo panel.
 

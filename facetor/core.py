@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Alaneo Houssart
+# Copyright (C) 2026 Alanéo Houssart
 #
 # ***** BEGIN GPL LICENSE BLOCK *****
 #
@@ -642,18 +642,29 @@ def _equal_arc(dense, count):
     return out
 
 
+def profile_exponent(shape):
+    """Super-ellipse exponent of a Round profile, as Blender's Bevel: 0.25 = straight chamfer,
+    0.5 = circle, 1 = square (the sharp corner), 0 = square the other way (concave)."""
+    shape = min(max(shape, 0.0), 1.0)
+    if shape > 0.999:
+        return 400.0
+    if shape < 0.001:
+        return 1.0 / 400.0
+    return -math.log(2.0) / math.log(math.sqrt(shape))
+
+
 def round_profile(a, b, c, shape, count, steps=256):
-    """Quarter super-ellipse from a to b bulging towards corner c.
-    shape 0.25 = straight chamfer, 0.5 = circle, 1 = almost square, < 0.25 = concave."""
+    """Quarter super-ellipse from a to b bulging towards corner c (profile_exponent)."""
     o = a + b - c
-    ex = 2.0 ** ((shape - 0.25) / 0.25)
+    ex = profile_exponent(shape)
     dense = []
-    for i in range(steps + 1):
+    for i in range(1, steps):
         th = (math.pi / 2) * i / steps
         x = max(math.cos(th), 0.0) ** (2.0 / ex)
         y = max(math.sin(th), 0.0) ** (2.0 / ex)
         dense.append(o + (a - o) * x + (b - o) * y)
-    return _equal_arc(dense, count)
+    # exact ends (cos 90° isn't 0 in floats, and a square shape's exponent lifts it to ~0.8)
+    return _equal_arc([a.copy()] + dense + [b.copy()], count)
 
 
 def custom_profile(a, b, c, profile, count, steps=256):

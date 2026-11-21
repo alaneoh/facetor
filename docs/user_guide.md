@@ -1,4 +1,4 @@
-# Facetor – User guide (version 1.0.0)
+# Facetor – User guide (version 1.0.1)
 
 Blender add-on that changes the number of segments of a round shape while
 keeping its silhouette: sides of a cylinder or a hole, segments of a bevel
@@ -12,7 +12,7 @@ Edit > Preferences > Get Extensions, search for **Facetor**, click Install.
 
 **From a file:**
 1. Edit > Preferences > Get Extensions > arrow at the top right > Install from Disk.
-2. Pick `facetor-1.0.0.zip`. You can also drag the .zip into Blender.
+2. Pick `facetor-1.0.1.zip`. You can also drag the .zip into Blender.
 
 If an older version is installed, remove it and restart Blender first,
 otherwise both fight over Alt+B.
@@ -40,9 +40,9 @@ otherwise both fight over Alt+B.
 | S | Switch direction (see below) |
 | R | Profile Type: Keep / Round / Custom |
 | W | The mouse sets the bevel width, in Keep too (the shape is scaled around its corner). Width 0 merges the bevel back into a sharp edge. |
-| Mouse move | Bevel width (in Round / Custom, or after W) |
+| Mouse move | Bevel width (in Round / Custom, or after W). Hold **Shift** for ten times finer steps (width and shape). |
 | T | Triangulate: the n-gons left by the change (around a hole, caps, recess walls) and the old triangles that got a vertex more become triangles. Remembered for next time. |
-| P | Shape: the mouse sets the shape of the round profile instead of the width (switches to Round): 0.25 = flat (chamfer), 0.5 = round, 1 = almost square corner. Press P again to go back to the width. |
+| P | Shape: the mouse sets the shape of the round profile instead of the width (switches to Round), on the same scale as Blender's Bevel: 0.25 = flat (chamfer), 0.5 = round, 1 = square corner, below 0.25 concave, 0 = square step inwards. It starts from the shape the part already has. Press P again to go back to the width. |
 | Left click / Enter | Confirm |
 | Right click / Esc | Cancel |
 
@@ -53,8 +53,9 @@ screw with a recess): number of rings of the rounded part; the recess is
 kept.
 What you set before pressing S is kept (e.g. 32 sides, then S for the
 fillet). If nothing was set before S, nothing is kept.
-Alt+B always starts in the main direction, in Keep, width 1 and profile 0.5
-(nothing is carried over from the last time).
+Alt+B always starts in the main direction, in Keep and width 1 (nothing is
+carried over from the last time). The shape starts from the part's own: fillets
+already set to 0.85 start at 0.85 when you press P or R.
 
 **Chamfers.** A chamfer (one flat segment between two faces) has no curve
 to keep: going up from 1 segment rounds it, like Blender's Bevel. Select the
@@ -110,8 +111,10 @@ expected). To change it: Bevel tool > Profile Type Custom.
   segment to one half).
 - A box bevelled on all its edges (corners where three fillets meet, made by
   Blender's Bevel): select every fillet. They all change, and each corner is
-  rebuilt the same way as Bevel does it, on the corner's sphere. Width works
-  too (0 gives the sharp box back). Corners where 4, 5 or more fillets meet
+  rebuilt the same way as Bevel does it, on the corner's sphere (or on the
+  surface of the chosen shape). Width works too (0 gives the sharp box back).
+  Shape 0 makes square steps, like Bevel: the corners disappear and the part
+  can't be changed again afterwards (undo to go back). Corners where 4, 5 or more fillets meet
   work the same way, and so do fillets with different segment counts: they
   all get the new count.
 - A whole torus, both directions (also from an edge loop around it).

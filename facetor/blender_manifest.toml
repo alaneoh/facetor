@@ -1,14 +1,13 @@
 schema_version = "1.0.0"
 
 id = "facetor"
-version = "1.0.0"
+version = "1.0.1"
 name = "Facetor"
 tagline = "Change the segments of any round shape, keep its silhouette"
-maintainer = "Alaneo Houssart"
+maintainer = "Alanéo Houssart"
 type = "add-on"
 
-# website: add the GitHub repository's URL once it is public (without it, Blender
-# shows the extension's page on extensions.blender.org)
+website = "https://github.com/alaneoh/facetor"
 
 tags = ["Mesh", "Modeling"]
 
@@ -18,7 +17,7 @@ license = [
   "SPDX:GPL-3.0-or-later",
 ]
 copyright = [
-  "2026 Alaneo Houssart",
+  "2026 Alanéo Houssart",
 ]
 
 [build]
