@@ -9,7 +9,7 @@ Select a cylinder, a hole, a bevel, a fillet or a part of revolution, press
 the mesh stays connected, and the result updates live. Facetor works on any mesh
 and handles the messy topology of CAD exports (MoI3D, Fusion 360, Plasticity…).
 
-- Version: **1.0.1**
+- Version: **1.0.2**
 - Blender: **4.2 LTS and later**
 - License: **GPL-3.0-or-later**
 - Maintainer: Alanéo Houssart
@@ -46,7 +46,7 @@ and handles the messy topology of CAD exports (MoI3D, Fusion 360, Plasticity…)
 **From Blender:** Edit > Preferences > Get Extensions, search for **Facetor**,
 click Install.
 
-**From disk:** download `facetor-1.0.1.zip` from the
+**From disk:** download `facetor-1.0.2.zip` from the
 [releases](../../releases), then Edit > Preferences > Get Extensions > arrow at
 the top right > Install from Disk (or drag the .zip into Blender).
 

@@ -1,4 +1,4 @@
-# Facetor – User guide (version 1.0.1)
+# Facetor – User guide (version 1.0.2)
 
 Blender add-on that changes the number of segments of a round shape while
 keeping its silhouette: sides of a cylinder or a hole, segments of a bevel
@@ -12,7 +12,7 @@ Edit > Preferences > Get Extensions, search for **Facetor**, click Install.
 
 **From a file:**
 1. Edit > Preferences > Get Extensions > arrow at the top right > Install from Disk.
-2. Pick `facetor-1.0.1.zip`. You can also drag the .zip into Blender.
+2. Pick `facetor-1.0.2.zip`. You can also drag the .zip into Blender.
 
 If an older version is installed, remove it and restart Blender first,
 otherwise both fight over Alt+B.
@@ -97,14 +97,17 @@ expected). To change it: Bevel tool > Profile Type Custom.
   n-gons. The corners still need manual cleanup.
 - Rounded corners on a flat face (n-gon): number of segments, width (in Keep
   the curve is scaled around its corner; width 0 gives the sharp corner back)
-  and, in Round, the profile, like Blender's Bevel.
+  and, in Round, the profile, like Blender's Bevel. A line of edges without
+  faces (a profile drawn for a Spin) works the same way: select the edges of
+  the corner, even a single straight edge, which rounds like a chamfer.
 - Holes in a flat face or a curved area, with or without a wall. If the flat
   area around the hole is cut into triangle fans (CAD), the fans are joined
   into n-gons so the hole can lose sides; press T to get triangles back.
   Width changes the hole's radius (the wall follows); it can't reach the
   edges around the hole.
 - Domes cut by geometry you don't select (a dish crossed by a raised bar,
-  a dish whose rim is cut by a step): select the dome's faces only. They
+  a dish whose rim is cut by a step): select the dome's faces (a bar
+  standing on the dish may be selected with it: it is kept as it is). They
   change together as one dome (S: rings of the profile); the cut edge stays
   exactly where it is and the faces next to it become n-gons where needed.
   Under 8 sides the two halves share the count (an odd count gives one more

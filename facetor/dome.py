@@ -25,7 +25,7 @@ import math
 import bmesh
 from mathutils import Vector
 
-from .core import TAU, _face_components
+from .core import TAU, _face_components, ordered
 from .grid import _resize_chain
 from .recess import _circle2d, _Curve
 from .revolution import profile_runs, revolution_cut_rings
@@ -92,6 +92,32 @@ def _profile(prof, beyond, has_pole=False):
     return _Curve(list(prof[:start]) + arc), start, (ctr, r, a0, da), pole
 
 
+def _rows_by_faces(faces, ring_of, row_ids, border):
+    """Rows in order along the profile from the border row, following the faces between them:
+    (order, None) or (None, error)."""
+    adj = {i: set() for i in row_ids}
+    for f in faces:
+        ids = {ring_of[v] for v in f.verts} & row_ids
+        if len(ids) > 2:
+            return None, "A face spans more than two rings."
+        if len(ids) == 2:
+            i, j = ids
+            adj[i].add(j)
+            adj[j].add(i)
+    if any(len(n) > 2 for n in adj.values()) or len(adj[border]) > 1:
+        return None, "The rings don't follow each other like a profile."
+    order, prev = [border], None
+    while True:
+        nxt = [j for j in adj[order[-1]] if j != prev and j not in order]
+        if not nxt:
+            break
+        prev = order[-1]
+        order.append(nxt[0])
+    if len(order) != len(row_ids):
+        return None, "The rings don't follow each other like a profile."
+    return order, None
+
+
 def dome_cut_setup(bm, faces):
     """Analysis of a dome cut by unselected geometry. Returns (data, None) or (None, error)."""
     if len(faces) < 4:
@@ -120,6 +146,21 @@ def dome_cut_setup(bm, faces):
             n = len(loop)
             ring_edge = [ring_of[loop[i]] == ring_of[loop[(i + 1) % n]] for i in range(n)]
             changes = [i for i in range(n) if ring_edge[i] and not ring_edge[i - 1]]
+            if len(changes) > 1 and sum(ring_edge) < n:
+                # the cut edge may also run along a ring for an edge (a bar resting on a
+                # coarse dish): the border is the longest run, on the widest ring
+                def run_len(i):
+                    k = 0
+                    while ring_edge[(i + k) % n] and k < n:
+                        k += 1
+                    return k
+                runs = sorted(changes, key=lambda i: (run_len(i), rings[ring_of[loop[i]]]["r"]), reverse=True)
+                best = runs[0]
+                if (run_len(runs[1]), rings[ring_of[loop[runs[1]]]]["r"]) != \
+                        (run_len(best), rings[ring_of[loop[best]]]["r"]):
+                    keep = {(best + k) % n for k in range(run_len(best))}
+                    ring_edge = [ring_edge[i] and i in keep for i in range(n)]
+                    changes = [best]
             if len(changes) != 1 or sum(ring_edge) == n:
                 return None, "This piece isn't bounded by a ring and one cut edge."
             loop = loop[changes[0]:] + loop[:changes[0]]
@@ -162,26 +203,16 @@ def dome_cut_setup(bm, faces):
 
     # ----- rows: rings holding vertices away from the cut, in order along the profile
     row_ids = {ring_of[v] for f in faces for v in f.verts if v not in cut} | {border}
-    adj = {i: set() for i in row_ids}
-    for f in faces:
-        ids = {ring_of[v] for v in f.verts} & row_ids
-        if len(ids) > 2:
-            return None, "A face spans more than two rings."
-        if len(ids) == 2:
-            i, j = ids
-            adj[i].add(j)
-            adj[j].add(i)
-    if any(len(n) > 2 for n in adj.values()) or len(adj[border]) > 1:
-        return None, "The rings don't follow each other like a profile."
-    order, prev = [border], None
-    while True:
-        nxt = [j for j in adj[order[-1]] if j != prev and j not in order]
-        if not nxt:
-            break
-        prev = order[-1]
-        order.append(nxt[0])
-    if len(order) != len(row_ids):
-        return None, "The rings don't follow each other like a profile."
+    order, err = _rows_by_faces(faces, ring_of, row_ids, border)
+    if err:
+        # coarse CAD triangulation (long triangles from the rim across a ring or two): a profile
+        # that goes steadily towards the axis from the border is ordered by radius
+        order = sorted(row_ids, key=lambda i: -rings[i]["r"])
+        hs = [rings[i]["h"] for i in order]
+        steady = all(h1 < h0 for h0, h1 in zip(hs, hs[1:])) or all(h1 > h0 for h0, h1 in zip(hs, hs[1:]))
+        if order[0] != border or not steady or \
+                any(r1 >= r0 for r0, r1 in zip([rings[i]["r"] for i in order], [rings[i]["r"] for i in order[1:]])):
+            return None, err
 
     def ring_rh(i):
         vs = [v for v in rings[i]["verts"] if v not in cut] or rings[i]["verts"]
@@ -217,7 +248,7 @@ def dome_cut_setup(bm, faces):
     for p in pieces:
         p["sC"] = sC = [curve.project(rh(v))[1] for v in p["C"]]
         im = max(range(len(sC)), key=lambda i: sC[i])
-        tol = 1e-4 * total
+        tol = 1e-2 * total      # CAD noise: a coarse ring that isn't quite round
         if any(s1 < s0 - tol for s0, s1 in zip(sC[:im], sC[1:im + 1])) or \
                 any(s1 > s0 + tol for s0, s1 in zip(sC[im:], sC[im + 1:])):
             return None, "The cut edge goes in and out of the dome more than once."
@@ -293,12 +324,46 @@ def _chain_edges(chain):
     return out
 
 
-def dome_cut_counts(bm, faces):
-    """(sides, rings of the profile) of a dome cut by unselected geometry, or None."""
+def dome_cut_counts(bm, faces, split=False):
+    """(sides, rings of the profile) of a dome cut by unselected geometry, or None.
+    split: also a dish selected with what stands on it (see dome_cut_split)."""
     data, err = dome_cut_setup(bm, faces)
     if err:
-        return None
+        if not split:
+            return None
+        split = dome_cut_split(bm, faces)
+        if split is None:
+            return None
+        data = split[1]
     return data["sides"], data["profile_count"]
+
+
+def dome_cut_split(bm, faces):
+    """A dish selected together with what stands on it (a bar across it): the faces that reach
+    past the plane of the dish's rim are set aside. Returns (dish faces, setup data) when what is
+    left is a dome cut by them, else None."""
+    data, err = revolution_cut_rings(bm, faces, loose=True)
+    if err:
+        return None
+    c, a, rings = data["c"], data["a"], data["rings"]
+    big = [r for r in rings if len(r["verts"]) >= 3]
+    if len(big) < 2:
+        return None
+    # the rim: the widest ring with the most vertices (the top of a bar standing on the rim
+    # is as wide, with fewer)
+    rmax = max(r["r"] for r in big)
+    rim = max((r for r in big if r["r"] > 0.99 * rmax), key=lambda r: len(r["verts"]))
+    others = [r["h"] - rim["h"] for r in big if r is not rim]
+    # the dish's side of the rim: where most rings are (one ring, the bar's top, is past it)
+    side = 1.0 if sum(1 for x in others if x > 0) > sum(1 for x in others if x < 0) else -1.0
+    verts = {v for f in faces for v in f.verts}
+    size = max(max(r["r"] for r in rings), max(abs((v.co - c).dot(a)) for v in verts), 1e-9)
+    tol = 1e-4 * size
+    rest = [f for f in faces if all(side * ((v.co - c).dot(a) - rim["h"]) > -tol for v in f.verts)]
+    if not rest or len(rest) == len(faces):
+        return None
+    d2, err = dome_cut_setup(bm, rest)
+    return None if err else (rest, d2)
 
 
 def dome_cut_rebuild(bm, faces, count, profile_segments=None, data=None):
@@ -447,9 +512,11 @@ def dome_cut_rebuild(bm, faces, count, profile_segments=None, data=None):
         gone = [v for v in old_verts if v not in keep and v.is_valid]
         if gone:
             bmesh.ops.delete(bm, geom=gone, context="VERTS")
-        wire = [e for e in old_edges if e.is_valid and not e.link_faces]
-        if wire:
-            bmesh.ops.delete(bm, geom=wire, context="EDGES_ONLY")
+        # edges left without faces, removed alone (their vertices stay); an open rim's and the
+        # cut's are kept: the border row is resized along them
+        chains = {e for p in data["pieces"] for ch in (p["B"], p["C"]) for e in _chain_edges(ch) if e}
+        for e in ordered(e for e in old_edges if e.is_valid and not e.link_faces and e not in chains):
+            bm.edges.remove(e)
         new_faces = []
         for p, prow in plans:
             C, thC = p["C"], p["thC"]

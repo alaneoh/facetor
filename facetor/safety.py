@@ -27,9 +27,9 @@ import bpy
 # Safety net: apply a change, check it didn't tear the mesh, roll back if it did
 # ---------------------------------------------------------------------------
 
-def _torn_edges(bm):
-    """Edges used by more than two faces, plus wire edges (no face)."""
-    return sum(1 for e in bm.edges if len(e.link_faces) > 2 or not e.link_faces)
+def _torn_edges(bm, wire=True):
+    """Edges used by more than two faces, plus wire edges (no face) unless wire is False."""
+    return sum(1 for e in bm.edges if len(e.link_faces) > 2 or (wire and not e.link_faces))
 
 
 def _boundary_edges(bm):
@@ -60,17 +60,17 @@ def _restore(bm, snap):
     bpy.data.meshes.remove(me)
 
 
-def guarded(bm, fn, allow_boundary_change=False):
+def guarded(bm, fn, allow_boundary_change=False, allow_wire=False):
     """Run fn(); if the mesh got torn (new holes, wire edges, >2 faces per edge), undo it.
-    Returns (ok, result)."""
+    allow_wire: new wire edges are fine (a line drawn with edges only). Returns (ok, result)."""
     snap = bm.copy()
-    t0, b0 = _torn_edges(bm), _boundary_edges(bm)
+    t0, b0 = _torn_edges(bm, not allow_wire), _boundary_edges(bm)
     try:
         res = fn()
         ok = res is not False
         if ok:
             bm.normal_update()
-            if _torn_edges(bm) > t0:
+            if _torn_edges(bm, not allow_wire) > t0:
                 ok = False
             elif not allow_boundary_change and _boundary_edges(bm) > b0:
                 ok = False

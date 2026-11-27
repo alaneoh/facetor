@@ -21,7 +21,7 @@
 bl_info = {
     "name": "Facetor",
     "author": "Alanéo Houssart",
-    "version": (1, 0, 1),
+    "version": (1, 0, 2),
     "blender": (4, 2, 0),
     "location": "Edit Mode > Face menu (Ctrl+F) / Edge menu (Ctrl+E) > Facetor, or Alt+B",
     "description": "Change the number of segments of cylinders, holes, bevels, fillets and other round shapes while keeping their silhouette",

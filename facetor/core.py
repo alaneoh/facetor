@@ -1039,12 +1039,6 @@ def hole_points(frame, pts, count, base=None):
 # Width in the other modes: what a shape is scaled around
 # ---------------------------------------------------------------------------
 
-def is_width(op):
-    """The width the operator asks for, if it isn't 1 (None otherwise)."""
-    w = getattr(op, "width", 1.0)
-    return None if abs(w - 1.0) < 1e-6 else w
-
-
 def _onward(v, nxt, inside):
     """Vertex joined to v by an edge (outside `inside`) that carries the curve on past v, in the
     direction it leaves v (v - nxt): the start of the straight part the curve is tangent to."""

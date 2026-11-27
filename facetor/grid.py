@@ -253,9 +253,21 @@ def plan_grid(bm, g, d, count, op, ctx_profile):
     # from CAD exports): dissolving such a vertex would tear the neighbouring faces.
     frozen_ks = set()
     flat_ks = set()
+    weld_ks = set()
+    band_ks = {}
     for k in chain_ks:
         inner = profs[k] if closed else profs[k][1:-1]
         outs_all = [f for v in inner for f in v.link_faces if f not in g.fset]
+        if closed:
+            p = profs[k]
+            ex = getattr(g, "extras", {}) or {}
+            if not any(frozenset((p[a], p[(a + 1) % len(p)])) in ex for a in range(len(p))):
+                ring = _triangle_band(p, set(outs_all), g.fset)
+                if ring is not None:
+                    # held by a band of triangles from another loop (the foot of a flared boss
+                    # on a wider cylinder top): the band is cut again around the new ring
+                    band_ks[k] = ring
+                    continue
         fan_centres = None
         out_set = set(outs_all)
         n_tris = sum(1 for f in out_set if len(f.verts) == 3)
@@ -313,10 +325,16 @@ def plan_grid(bm, g, d, count, op, ctx_profile):
         # small n-gons joins it to the new segments (messy CAD corners at the ends of a band)
         anchors = sum(1 for v in inner if any(e not in grid_edges for e in v.link_edges))
         if count < M and anchors > (count if closed else count - 1):
-            if not closed and math.ceil(M / count) <= MAX_JOIN_SPAN:
+            if closed:
+                # a closed ring (the foot of a boss's fillet on a curved grip, held by fans
+                # from far-off vertices): the vertices it loses are welded into the kept ones,
+                # the outside faces follow (see _resize_chain)
+                weld_ks.add(k)
+                continue
+            if math.ceil(M / count) <= MAX_JOIN_SPAN:
                 frozen_ks.add(k)
                 continue
-            least = anchors if closed else min(anchors + 1, math.ceil(M / MAX_JOIN_SPAN))
+            least = min(anchors + 1, math.ceil(M / MAX_JOIN_SPAN))
             return ("The edge of this part is joined to other geometry in %d places (T-junctions): "
                     "use %d segments or more." % (anchors, max(least, 1))), None
     delete_verts = []
@@ -334,15 +352,169 @@ def plan_grid(bm, g, d, count, op, ctx_profile):
     plan = dict(seam_rails=seam_rails, Q=Q, d=d, closed=closed, rails_cyclic=rails_cyclic, K=K, M=M, profs=profs, new_pts=new_pts,
                 params=params, rail_attr=rail_attr, prof_attr=prof_attr, old_faces=old_faces,
                 uv_layers=uv_layers, chain_ks=chain_ks, delete_verts=delete_verts, count=count, fset=g.fset,
-                frozen_ks=frozen_ks, old_edges=ordered(grid_edges), flat_ks=flat_ks,
-                extras=getattr(g, "extras", {}))
+                frozen_ks=frozen_ks, old_edges=ordered(grid_edges), flat_ks=flat_ks, weld_ks=weld_ks,
+                band_ks=band_ks, extras=getattr(g, "extras", {}))
     if len(frozen_ks) >= K:
         return "Both sides of this part are held by other geometry: it can't be changed.", None
     return None, plan
 
 
-def _resize_chain(bm, chain, closed, count, new_pts):
-    """Change the vertex count of a boundary chain still attached to outside faces."""
+def _triangle_band(chain, faces, fset):
+    """The outside faces of a closed chain are only triangles between it and one other closed
+    loop, each with one edge on the chain or on that loop (a CAD band of triangles): that loop
+    in order, else None."""
+    cset = set(chain)
+    if len(faces) < 3 or any(len(f.verts) != 3 for f in faces):
+        return None
+    nbr = {}
+    for f in ordered(faces):
+        o = [v for v in f.verts if v not in cset]
+        if len(o) not in (1, 2):
+            return None
+        for v in o:
+            if any(h in fset for h in v.link_faces):
+                return None
+            nbr.setdefault(v, [])
+        if len(o) == 2:
+            nbr[o[0]].append(o[1])
+            nbr[o[1]].append(o[0])
+    if len(nbr) < 3 or len(faces) != len(chain) + len(nbr):
+        return None
+    if any(len(n) != 2 or n[0] is n[1] for n in nbr.values()):
+        return None
+    start = ordered(nbr)[0]
+    loop, prev, cur = [start], None, start
+    while True:
+        a, b = nbr[cur]
+        nxt = b if a is prev else a
+        if nxt is start:
+            break
+        loop.append(nxt)
+        prev, cur = cur, nxt
+        if len(loop) > len(nbr):
+            return None
+    return loop if len(loop) == len(nbr) else None
+
+
+def _band_cut(bm, chain, ring):
+    """Remove the triangles between a closed chain and the loop ring (see _triangle_band),
+    with the edges between them; what is needed to fill the band again is returned."""
+    faces = {f for v in chain for f in v.link_faces}
+    uv_layers = list(bm.loops.layers.uv.values())
+    old = [(f.calc_center_median(), f.normal.copy(), f.material_index, f.smooth,
+            [(l.vert, l.vert.co.copy(), [l[lay].uv.copy() for lay in uv_layers]) for l in f.loops])
+           for f in ordered(faces)]
+    bmesh.ops.delete(bm, geom=ordered(faces), context="FACES_ONLY")
+    rset = set(ring)
+    for v in chain:
+        for e in [e for e in v.link_edges if e.other_vert(v) in rset]:
+            bm.edges.remove(e)
+    return old
+
+
+def _band_fill(bm, chain, ring, old):
+    """Triangles between the new closed chain and the loop ring, cut evenly by angle around
+    the chain's axis (a zip: each step goes on along the side whose next edge comes first)."""
+    from mathutils import Vector
+    from mathutils.geometry import barycentric_transform
+    n, m = len(chain), len(ring)
+    c = sum((v.co for v in chain), Vector()) / n
+    nrm = Vector()
+    for i in range(n):
+        nrm += (chain[i].co - c).cross(chain[(i + 1) % n].co - c)
+    if nrm.length < 1e-12:
+        return []
+    nrm.normalize()
+    u = chain[0].co - c
+    u = (u - nrm * u.dot(nrm)).normalized()
+    w = nrm.cross(u)
+
+    def ang(p):
+        d = p - c
+        return math.atan2(d.dot(w), d.dot(u))
+
+    def unwrap(vs):
+        out = [ang(vs[0].co)]
+        for v in vs[1:]:
+            a = ang(v.co)
+            while a < out[-1] - math.pi:
+                a += 2 * math.pi
+            while a > out[-1] + math.pi:
+                a -= 2 * math.pi
+            out.append(a)
+        return out
+    A = unwrap(chain)                              # increasing (Newell normal)
+    R = unwrap(ring)
+    if R[-1] < R[0]:
+        ring = ring[::-1]
+        R = unwrap(ring)
+    # ring starts at its vertex nearest to chain[0] in angle
+    j0 = min(range(m), key=lambda j: abs((R[j] - A[0] + math.pi) % (2 * math.pi) - math.pi))
+    ring = ring[j0:] + ring[:j0]
+    R = unwrap(ring)
+    off = (R[0] - A[0] + math.pi) % (2 * math.pi) - math.pi
+    A = [a - A[0] for a in A] + [2 * math.pi]
+    R = [r - R[0] + off for r in R] + [off + 2 * math.pi]
+    tris = []
+    i = j = 0
+    while i < n or j < m:
+        if j >= m or (i < n and (A[i] + A[i + 1]) < (R[j] + R[j + 1])):
+            tris.append((chain[i], chain[(i + 1) % n], ring[j % m]))
+            i += 1
+        else:
+            tris.append((chain[i % n], ring[(j + 1) % m], ring[j]))
+            j += 1
+    uv_layers = list(bm.loops.layers.uv.values())
+    made = []
+    for vs in tris:
+        try:
+            f = bm.faces.new(vs)
+        except ValueError:
+            continue
+        made.append(f)
+    if not made:
+        return made
+    # same side as the old band
+    vote = 0.0
+    for f in made:
+        f.normal_update()
+        cen = f.calc_center_median()
+        ref = min(old, key=lambda x: (x[0] - cen).length)
+        vote += f.normal.dot(ref[1])
+    if vote < 0:
+        bmesh.ops.reverse_faces(bm, faces=made)
+    for f in made:
+        f.normal_update()
+        cen = f.calc_center_median()
+        ref = min(old, key=lambda x: (x[0] - cen).length)
+        f.material_index, f.smooth = ref[2], ref[3]
+        if not uv_layers:
+            continue
+        pts = [x[1] for x in ref[4]]
+        for l in f.loops:
+            # a ring vertex keeps its UV (from the old triangle round it nearest to this one)
+            exact = None
+            if l.vert not in chain:
+                best = None
+                for o in old:
+                    for v, _, uvs in o[4]:
+                        if v is l.vert and (best is None or (o[0] - cen).length < best[0]):
+                            best = ((o[0] - cen).length, uvs)
+                exact = best[1] if best else None
+            for li, lay in enumerate(uv_layers):
+                if exact is not None:
+                    l[lay].uv = exact[li]
+                    continue
+                src = [Vector((x[2][li].x, x[2][li].y, 0.0)) for x in ref[4]]
+                q = barycentric_transform(l.vert.co, pts[0], pts[1], pts[2], src[0], src[1], src[2])
+                l[lay].uv = (q.x, q.y)
+    return made
+
+
+def _resize_chain(bm, chain, closed, count, new_pts, weld=False):
+    """Change the vertex count of a boundary chain still attached to outside faces.
+    weld: (closed chain with more vertices joined to outside geometry than the new count) the
+    vertices left out are welded into the nearest kept one, so the outside faces follow."""
     M = len(chain) if closed else len(chain) - 1
     if closed:
         anchor = min(range(len(chain)), key=lambda i: (chain[i].co - new_pts[0]).length)
@@ -360,6 +532,21 @@ def _resize_chain(bm, chain, closed, count, new_pts):
                    if any(e.other_vert(chain[i]) not in cset for e in chain[i].link_edges)]
         need = count if closed else count + 1
         fixed = set(anchors) if closed else set(anchors) | {0, M}
+        if weld and closed:
+            n = len(chain)
+            kset = set(keep)
+            targets = {}
+            for i, v in enumerate(chain):
+                if i in kset:
+                    continue
+                # nearest kept index along the ring (the one before on a tie)
+                j = min(keep, key=lambda q: (min((i - q) % n, (q - i) % n), (q - i) % n))
+                targets[v] = chain[j]
+            for v, t in targets.items():
+                v.co = t.co.copy()
+            if targets:
+                bmesh.ops.weld_verts(bm, targetmap=targets)
+            return [chain[i] for i in keep]
         if anchors and len(fixed) <= need:
             chosen = set(fixed)
             free = [i for i in range(len(chain)) if i not in chosen]
@@ -429,6 +616,7 @@ def execute_plan(bm, plan):
     old_endpoints = [(p[0], p[-1]) for p in profs] if not closed else None
 
     bmesh.ops.delete(bm, geom=list(plan["fset"]), context="FACES_ONLY")
+    bands = {k: (ring, _band_cut(bm, profs[k], ring)) for k, ring in plan.get("band_ks", {}).items()}
     dv = [v for v in plan["delete_verts"] if v.is_valid]
     if dv:
         bmesh.ops.delete(bm, geom=dv, context="VERTS")
@@ -456,14 +644,24 @@ def execute_plan(bm, plan):
                 kept.pop(frozenset((p[a], p[(a + 1) % len(p)])), None)
     plan["extras"] = kept
     new_profs = []
+    folded = []      # (centre, normal) of the outside faces of welded chains, before
+    for k in plan.get("weld_ks", ()):
+        p = profs[k]
+        out = {f for v in p for f in v.link_faces}
+        folded += [(f.calc_center_median(), f.normal.copy()) for f in out if f.normal.length > 0.5]
     for k in range(K):
         if k in frozen:
             new_profs.append(list(profs[k]))      # kept as it is
             continue
-        if k in plan["chain_ks"]:
+        if k in bands:
+            # free once its band is cut: a new ring, the old vertices go
+            bmesh.ops.delete(bm, geom=[v for v in profs[k] if v.is_valid], context="VERTS")
+            chain = [bm.verts.new(p) for p in new_pts[k]]
+        elif k in plan["chain_ks"]:
             if k in plan.get("flat_ks", ()) and count < plan["M"]:
                 _free_flat_side(bm, profs[k], closed)
-            chain = _resize_chain(bm, _chain_with_extras(profs[k], closed, extras), closed, count, new_pts[k])
+            chain = _resize_chain(bm, _chain_with_extras(profs[k], closed, extras), closed, count, new_pts[k],
+                                  weld=k in plan.get("weld_ks", ()))
         else:
             if closed:
                 chain = [bm.verts.new(p) for p in new_pts[k]]
@@ -474,6 +672,20 @@ def execute_plan(bm, plan):
             v.co = p
         new_profs.append(chain)
     plan["new_profs"] = new_profs
+    for k, (ring, old) in bands.items():
+        _band_fill(bm, new_profs[k], ring, old)
+    if folded:
+        # welding the vertices left out moved the outside faces: none may turn over (very low
+        # counts on a ring held by fans)
+        for k in plan["weld_ks"]:
+            for f in {f for v in new_profs[k] for f in v.link_faces}:
+                c = f.calc_center_median()
+                f.normal_update()
+                ref = min(folded, key=lambda x: (x[0] - c).length)[1]
+                if f.normal.length < 0.5 or f.normal.dot(ref) < 0.0:
+                    plan["error"] = ("Too few segments: the faces around this part would fold "
+                                     "over. Use more segments.")
+                    raise ValueError(plan["error"])
 
     # faces
     n_faces_k = K if plan["rails_cyclic"] else K - 1

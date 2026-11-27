@@ -32,7 +32,7 @@ from .core import (
     AXES, _face_components, apply_profile, direction_stats, edge_between, grid_profiles, profile_reduce,
     ordered,
 )
-from .dome import dome_cut_counts, dome_cut_rebuild, dome_cut_setup
+from .dome import dome_cut_counts, dome_cut_rebuild, dome_cut_setup, dome_cut_split
 from .grid import (
     _subgrid, collapse_tiny_edges, collapse_to_corners, execute_plan, extend_t_columns, merge_caps,
     plan_grid, resample_bands, tiny_edges,
@@ -117,7 +117,16 @@ def _dome_change(op, bm, me, sel, infos):
     """Dome cut by unselected geometry (a bar across a dish): (err, did, infos), or None if it isn't one."""
     data, err = dome_cut_setup(bm, sel)
     if err:
-        return None
+        # selected with what stands on it (the bar): that part is set aside and kept as it is
+        split = dome_cut_split(bm, sel)
+        if split is None:
+            return None
+        sel, data = split
+        keep = set(sel)
+        for f in bm.faces:
+            if f.select and f not in keep:
+                f.select = False
+        infos.append("bar kept")
     werr = _no_width(op, "a dome cut by other geometry")
     if werr:
         return werr, False, infos
@@ -417,6 +426,10 @@ Select its faces, the edge loop of a hole, or the edges of a rounded corner on a
                     rc = recess_counts(obj.data, bm, sel)
                     if rc and rc[1 if self.swap else 0]:
                         return rc[1 if self.swap else 0], not self.swap
+                    # a dish selected with the bar on it (after the recess mode, as in _process)
+                    dc = dome_cut_counts(bm, sel, split=True)
+                    if dc and dc[1 if self.swap else 0]:
+                        return dc[1 if self.swap else 0], not self.swap
                 if self.swap:
                     n = revolution_profile_count(bm, sel) if revolution_rings(bm, sel)[1] is None \
                         else (revolution_clip_profile_count(bm, sel) or revolution_cut_profile_count(bm, sel))
@@ -1345,7 +1358,11 @@ Select its faces, the edge loop of a hole, or the edges of a rounded corner on a
         # a ring around a tube: its sides change (an open chain keeps the automatic direction)
         grids = _chain_dirs(grids, chain_verts if chain_closed else None, self.swap)
         plans = []
+        # faces of the grids outside the bands that change (the wall of a cylinder whose fillet
+        # changes): still selected afterwards, so S then works on the whole part
+        untouched = set()
         for g, dirn in grids:
+            untouched |= set(g.fset)
             for band in resample_bands(g, dirn):
                 if band is None:
                     gg, n_old = g, direction_stats(g, dirn)[0]
@@ -1356,6 +1373,7 @@ Select its faces, the edge loop of a hole, or the edges of a rounded corner on a
                 err, plan = plan_grid(bm, gg, dirn, self.segments, self, profile)
                 if err:
                     return err, False, infos
+                untouched -= set(gg.fset)
                 plans.append(plan)
                 infos.append("%s %d -> %d" % (kind, n_old, self.segments))
         for f in bm.faces:
@@ -1377,7 +1395,11 @@ Select its faces, the edge loop of a hole, or the edges of a rounded corner on a
                 chain_pick = [(p_i, k) for n, p_i, k in hits if n == best or n >= 2]
         ok, _ = guarded(bm, do)
         if not ok:
-            return "This part is joined to the rest of the mesh in a way that can't be changed safely.", False, infos
+            why = next((p["error"] for p in plans if p.get("error")), None)
+            return why or "This part is joined to the rest of the mesh in a way that can't be changed safely.", False, infos
+        for f in untouched:
+            if f.is_valid:
+                f.select = True
         if core is not None:
             infos.append("ends kept")
         prof = None

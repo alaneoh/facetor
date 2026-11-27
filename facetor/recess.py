@@ -411,7 +411,21 @@ def _clip_setup(bm, faces, profile_segments, floor):
              any(g in surface for e in f.edges for g in e.link_faces)]
     if not walls:
         return None, "Nothing cuts this part."
+    # a triangulated wall (CAD): its triangles that only touch the surface at a vertex are joined
+    # by an edge to the others, in the same plane
     wall_set = set(walls)
+    span = max(rh(v.co).length for f in faces for v in f.verts) or 1.0
+    grow = list(walls)
+    while grow:
+        f = grow.pop()
+        for e in f.edges:
+            for g in e.link_faces:
+                if (g in fset and g not in wall_set and g not in surface and g not in order_caps
+                        and g.normal.length > 0.5 and g.normal.dot(f.normal) > 0.999
+                        and abs((g.calc_center_median() - f.calc_center_median()).dot(f.normal)) < 1e-4 * span):
+                    wall_set.add(g)
+                    walls.append(g)
+                    grow.append(g)
     cap_set = set(order_caps)
     for f in surface:
         for e in f.edges:

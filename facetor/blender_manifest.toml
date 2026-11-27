@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "facetor"
-version = "1.0.1"
+version = "1.0.2"
 name = "Facetor"
 tagline = "Change the segments of any round shape, keep its silhouette"
 maintainer = "Alanéo Houssart"

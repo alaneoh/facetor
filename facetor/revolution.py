@@ -538,14 +538,16 @@ def _border_circles(faces):
     when they lie on a circle (the rim of a dish cut by a bar, once it has only a few columns)."""
     fset = set(faces)
     groups = {}
+    open_rim = set()       # an open border (a dish's rim with nothing around it)
     for f in faces:
         for e in f.edges:
             outs = [g for g in e.link_faces if g not in fset]
             if len(outs) == 1:
                 groups.setdefault(outs[0], set()).update(e.verts)
+            elif len(e.link_faces) == 1:
+                open_rim.update(e.verts)
     out = []
-    for g in ordered(groups):
-        vs = ordered(groups[g])
+    for vs in [ordered(groups[g]) for g in ordered(groups)] + [ordered(open_rim)]:
         if len(vs) < 5:
             continue
         fit = fit_circle([v.co.copy() for v in vs])

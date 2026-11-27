@@ -184,7 +184,9 @@ class Keeper:
         moved = {v for v in bm.verts if self._moved(v, vl)}
         if self.uv_layers and self.tris:
             for f in bm.faces:
-                new_face = f[fl] == 0 or f[fl] not in self.face_tris
+                if f[fl] != 0 and f[fl] not in self.face_tris:
+                    continue        # an old face away from the change (another piece): as it was
+                new_face = f[fl] == 0
                 if new_face and not new_faces:
                     continue
                 todo = [l for l in f.loops if new_face or l.vert in moved]

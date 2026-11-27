@@ -80,15 +80,13 @@ def outline_arcs(bm):
     if any(f.select for f in bm.faces):
         return None
     sel = [e for e in bm.edges if e.select]
-    if len(sel) < 2:
+    if not sel:
         return None
     chains = _open_chains(sel)
     if not chains:
         return None
     arcs = []
     for chain in chains:
-        if len(chain) < 3:
-            return None
         cset = set(chain)
         faces = set()
         for a, b in zip(chain, chain[1:]):
@@ -96,13 +94,18 @@ def outline_arcs(bm):
             if e is None:
                 return None
             faces |= set(e.link_faces)
-        if not faces or any(not cset <= set(f.verts) for f in faces):
+        # a wire line (a profile drawn with edges only, no face anywhere on it): any chain,
+        # even one edge (a chamfer, rounded like Bevel)
+        wire = not faces and not any(v.link_faces for v in chain)
+        if len(chain) < 3 and not wire:
+            return None
+        if not wire and (not faces or any(not cset <= set(f.verts) for f in faces)):
             return None
         pa = _outside_neighbour(chain[0], chain[1], faces)
         pb = _outside_neighbour(chain[-1], chain[-2], faces)
         if pa is None or pb is None or pa in cset or pb in cset:
             return None
-        arcs.append({"chain": chain, "pa": pa, "pb": pb, "faces": ordered(faces)})
+        arcs.append({"chain": chain, "pa": pa, "pb": pb, "faces": ordered(faces), "wire": wire})
     return arcs
 
 
@@ -128,6 +131,10 @@ def outline_corner(arc):
 
 def outline_arc_points(arc, count, shape, profile_shape, width, profile=None):
     pts = [v.co.copy() for v in arc["chain"]]
+    if shape == "KEEP" and len(pts) == 2 and count > 1 and outline_corner(arc) is not None:
+        # one straight segment (a chamfer) has no curve to keep: more segments round it, like
+        # Blender's Bevel
+        shape = "ROUND"
     if shape == "KEEP" and abs(width - 1.0) < 1e-6:
         return keep_open(pts, count), None
     c = outline_corner(arc)
@@ -225,7 +232,7 @@ def outline_arc_rebuild(bm, arc, count, op, profile=None):
             if e:
                 e.select = True
         return True
-    ok, _ = guarded(bm, do)
+    ok, _ = guarded(bm, do, allow_wire=arc.get("wire", False))
     if not ok:
         return "This arc can't be changed safely (try more segments)."
     return None
